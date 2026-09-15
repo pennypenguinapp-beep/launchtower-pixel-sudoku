@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Pixel Sudoku — LaunchTower</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2d3748;
+    --ink:#e6edf3; --dim:#8b98a9; --accent:#4fd1c5; --accent2:#7c5cff;
+    --err:#ff6b6b; --ok:#51cf66; --gold:#ffd43b;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Courier New", ui-monospace, Menlo, Consolas, monospace;
+    display:flex; flex-direction:column; align-items:center;
+    min-height:100vh; padding:12px 10px 20px;
+    image-rendering:pixelated;
+  }
+  header{ text-align:center; margin-bottom:10px; }
+  h1{
+    font-size:clamp(18px,4.5vw,26px); letter-spacing:2px; text-transform:uppercase;
+    color:var(--ink);
+  }
+  h1 .px{ color:var(--accent); }
+  .tag{ color:var(--dim); font-size:11px; letter-spacing:1px; margin-top:4px; }
+
+  .hud{
+    display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap;
+    width:100%; max-width:460px; margin-bottom:10px;
+  }
+  .stat{
+    background:var(--panel); border:2px solid var(--line); padding:6px 10px;
+    font-size:12px; letter-spacing:1px; min-width:74px; text-align:center;
+  }
+  .stat b{ display:block; font-size:15px; margin-top:2px; color:var(--accent); }
+  .stat.err b{ color:var(--err); }
+  .stat.best b{ color:var(--gold); }
+
+  .diff{ display:flex; gap:6px; margin-bottom:10px; }
+  .diff button{
+    background:var(--panel); color:var(--dim); border:2px solid var(--line);
+    padding:7px 12px; font-family:inherit; font-size:12px; letter-spacing:1px;
+    cursor:pointer; text-transform:uppercase;
+  }
+  .diff button.active{ background:var(--accent2); color:#fff; border-color:var(--accent2); }
+
+  .board-wrap{
+    position:relative; width:min(92vw,440px); aspect-ratio:1/1;
+    background:var(--panel); border:3px solid var(--line);
+    box-shadow:0 0 0 4px #0a0d12, 0 12px 30px rgba(0,0,0,.5);
+  }
+  canvas{ display:block; width:100%; height:100%; image-rendering:pixelated; }
+
+  .controls{
+    display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap;
+    width:100%; max-width:460px; margin-top:12px;
+  }
+  .btn{
+    background:var(--panel2); color:var(--ink); border:2px solid var(--line);
+    padding:9px 14px; font-family:inherit; font-size:12px; letter-spacing:1px;
+    cursor:pointer; text-transform:uppercase;
+  }
+  .btn:hover{ border-color:var(--accent); }
+  .btn.on{ background:var(--accent); color:#06281f; border-color:var(--accent); }
+  .btn.new{ background:var(--accent2); color:#fff; border-color:var(--accent2); }
+
+  .keypad{
+    display:grid; grid-template-columns:repeat(9,1fr); gap:5px;
+    width:100%; max-width:460px; margin-top:12px;
+  }
+  .keypad button{
+    background:var(--panel); color:var(--ink); border:2px solid var(--line);
+    font-family:inherit; font-size:16px; padding:10px 0; cursor:pointer;
+  }
+  .keypad button:active{ background:var(--accent); color:#06281f; }
+  .keypad button.done{ opacity:.25; pointer-events:none; }
+  .keypad button.hint{ color:var(--accent); }
+
+  .msg{
+    min-height:20px; margin-top:10px; font-size:13px; letter-spacing:1px;
+    color:var(--dim); text-align:center;
+  }
+  .msg.win{ color:var(--ok); font-size:15px; }
+  .msg.bad{ color:var(--err); }
+
+  footer{ margin-top:18px; font-size:11px; color:var(--dim); }
+  footer a{ color:var(--accent); text-decoration:none; }
+  footer a:hover{ text-decoration:underline; }
+
+  /* win overlay */
+  .overlay{
+    position:absolute; inset:0; background:rgba(10,13,18,.86);
+    display:none; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:20px; z-index:5;
+  }
+  .overlay.show{ display:flex; }
+  .overlay h2{ font-size:26px; letter-spacing:3px; color:var(--gold); margin-bottom:10px; }
+  .overlay p{ color:var(--ink); font-size:14px; margin:4px 0; }
+  .overlay .btn{ margin-top:16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="px">▚</span> Pixel Sudoku <span class="px">▞</span></h1>
+  <div class="tag">LAUNCHTOWER · SOLVE · NO HINTS NEEDED</div>
+</header>
+
+<div class="hud">
+  <div class="stat">TIME<b id="time">0:00</b></div>
+  <div class="stat err">MISTAKES<b id="mistakes">0</b></div>
+  <div class="stat best">BEST<b id="best">—</b></div>
+</div>
+
+<div class="diff" id="diff">
+  <button data-d="easy">Easy</button>
+  <button data-d="medium" class="active">Medium</button>
+  <button data-d="hard">Hard</button>
+</div>
+
+<div class="board-wrap">
+  <canvas id="board" width="440" height="440"></canvas>
+  <div class="overlay" id="overlay">
+    <h2>SOLVED!</h2>
+    <p id="ovTime">Time: 0:00</p>
+    <p id="ovBest">Best: —</p>
+    <p id="ovMist">Mistakes: 0</p>
+    <button class="btn new" id="ovNew">New Game</button>
+  </div>
+</div>
+
+<div class="controls">
+  <button class="btn" id="pencil">✎ Pencil</button>
+  <button class="btn" id="erase">⌫ Erase</button>
+  <button class="btn" id="undo">↶ Undo</button>
+  <button class="btn new" id="new">New Game</button>
+</div>
+
+<div class="keypad" id="keypad"></div>
+
+<div class="msg" id="msg">Tap a cell, then a number. Pencil marks for notes.</div>
+
+<footer>
+  Built by <a href="https://pennypenguinapp-beep.github.io/" target="_blank" rel="noopener">LaunchTower</a> · more pixel tools &amp; games
+</footer>
+
+<script>
+"use strict";
+/* ============================ PIXEL SUDOKU ============================
+   Single-file, no assets. 9x9 sudoku, 3 difficulties, unique-solution
+   generation (backtracking solver + count), pencil marks, mistakes,
+   timer + per-difficulty best times (localStorage), touch keypad.
+   ==================================================================== */
+
+const N = 9;
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+
+// logical grid state
+let solution = [];   // 81 array, final solved values
+let given = [];      // 81 array, 0 = empty
+let cell = [];       // 81 array, current user value 0-9
+let notes = [];      // 81 array of Set(1..9)
+let selected = -1;
+let pencilMode = false;
+let mistakes = 0;
+let started = false;
+let finished = false;
+let startTime = 0;
+let elapsed = 0;
+let timerId = null;
+let undoStack = [];
+let difficulty = 'medium';
+
+const DIFF = {
+  easy:   { remove: 38, label: 'EASY'   },
+  medium: { remove: 50, label: 'MEDIUM' },
+  hard:   { remove: 55, label: 'HARD'   }
+};
+
+/* --------------------------- RNG (seedable) --------------------------- */
+let _seed = (Date.now() ^ 0x9e3779b9) >>> 0;
+function rng(){
+  // xorshift32
+  _seed ^= _seed << 13; _seed >>>= 0;
+  _seed ^= _seed >>> 17;
+  _seed ^= _seed << 5; _seed >>>= 0;
+  return (_seed >>> 0) / 4294967296;
+}
+function shuffle(a){
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(rng()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
+  }
+  return a;
+}
+
+/* --------------------------- solver --------------------------- */
+function findEmpty(g){
+  for(let i=0;i<81;i++) if(g[i]===0) return i;
+  return -1;
+}
+function canPlace(g, idx, v){
+  const r = (idx/9)|0, c = idx%9;
+  for(let i=0;i<9;i++){
+    if(g[r*9+i]===v) return false;
+    if(g[i*9+c]===v) return false;
+  }
+  const br = ((r/3)|0)*3, bc = ((c/3)|0)*3;
+  for(let rr=br;rr<br+3;rr++)
+    for(let cc=bc;cc<bc+3;cc++)
+      if(g[rr*9+cc]===v) return false;
+  return true;
+}
+function solve(g, limit){
+  const idx = findEmpty(g);
+  if(idx === -1) return 1;
+  let count = 0;
+  for(let v=1; v<=9; v++){
+    if(canPlace(g, idx, v)){
+      g[idx]=v;
+      count += solve(g, limit);
+      g[idx]=0;
+      if(limit && count >= limit) return count;
+    }
+  }
+  return count;
+}
+function countSolutions(g, limit){
+  return solve(g.slice(), limit);
+}
+
+/* --------------------------- generator --------------------------- */
+function generateFull(){
+  const g = new Array(81).fill(0);
+  const vals = shuffle([1,2,3,4,5,6,7,8,9]);
+  // fill row 0
+  for(let c=0;c<9;c++) g[c]=vals[c];
+  // solve the rest with randomized order
+  function fill(){
+    const idx = findEmpty(g);
+    if(idx===-1) return true;
+    const vs = shuffle([1,2,3,4,5,6,7,8,9]);
+    for(const v of vs){
+      if(canPlace(g, idx, v)){
+        g[idx]=v;
+        if(fill()) return true;
+        g[idx]=0;
+      }
+    }
+    return false;
+  }
+  fill();
+  return g;
+}
+function makePuzzle(full, remove){
+  const puzzle = full.slice();
+  const positions = shuffle([...Array(81).keys()]);
+  let removed = 0;
+  for(const idx of positions){
+    if(removed >= remove) break;
+    const backup = puzzle[idx];
+    if(backup === 0) continue;
+    puzzle[idx] = 0;
+    // ensure unique solution
+    if(countSolutions(puzzle, 2) !== 1){
+      puzzle[idx] = backup; // restore
+    } else {
+      removed++;
+    }
+  }
+  return puzzle;
+}
+function newGame(diff){
+  difficulty = diff;
+  const full = generateFull();
+  const puzzle = makePuzzle(full, DIFF[diff].remove);
+  solution = full;
+  given = puzzle.slice();
+  cell = puzzle.slice();
+  notes = Array.from({length:81}, ()=>new Set());
+  selected = -1;
+  mistakes = 0;
+  finished = false;
+  started = false;
+  elapsed = 0;
+  undoStack = [];
+  if(timerId){ clearInterval(timerId); timerId=null; }
+  document.getElementById('overlay').classList.remove('show');
+  setMsg('Tap a cell, then a number. Pencil marks for notes.', '');
+  updateHUD();
+  render();
+}
+
+/* --------------------------- input --------------------------- */
+function pushUndo(){
+  undoStack.push({
+    idx: selected,
+    cell: cell.slice(),
+    notes: notes.map(s=>new Set(s))
+  });
+  if(undoStack.length > 200) undoStack.shift();
+}
+function doUndo(){
+  if(!undoStack.length) return;
+  const s = undoStack.pop();
+  cell = s.cell.slice();
+  notes = s.notes.map(set=>new Set(set));
+  updateHUD();
+  render();
+}
+function placeValue(v){
+  if(finished || selected < 0) return;
+  if(given[selected] !== 0) return; // can't change givens
+  pushUndo();
+  if(pencilMode){
+    if(notes[selected].has(v)) notes[selected].delete(v);
+    else notes[selected].add(v);
+  } else {
+    if(cell[selected] !== v){
+      cell[selected] = v;
+      notes[selected].clear();
+      if(v !== solution[selected]){
+        mistakes++;
+        setMsg('Not right — check row, column, box.', 'bad');
+      } else {
+        setMsg('Nice.', '');
+      }
+    }
+  }
+  updateHUD();
+  render();
+  checkWin();
+}
+function eraseCell(){
+  if(finished || selected < 0) return;
+  if(given[selected] !== 0) return;
+  if(cell[selected]===0 && notes[selected].size===0) return;
+  pushUndo();
+  cell[selected]=0;
+  notes[selected].clear();
+  updateHUD();
+  render();
+}
+function checkWin(){
+  for(let i=0;i<81;i++){
+    if(cell[i] !== solution[i]) return;
+  }
+  finished = true;
+  if(timerId){ clearInterval(timerId); timerId=null; }
+  // save best
+  const key = 'psudoku_best_'+difficulty;
+  const prev = parseInt(localStorage.getItem(key)||'0',10);
+  const isRecord = !prev || elapsed < prev;
+  if(isRecord) localStorage.setItem(key, String(elapsed));
+  document.getElementById('ovTime').textContent = 'Time: ' + fmt(elapsed);
+  document.getElementById('ovBest').textContent = 'Best: ' + fmt(isRecord?elapsed:prev) + (isRecord?'  ★ NEW':'');
+  document.getElementById('ovMist').textContent = 'Mistakes: ' + mistakes;
+  document.getElementById('overlay').classList.add('show');
+  setMsg('Solved! Great work.', 'win');
+  updateHUD();
+}
+
+/* --------------------------- HUD / timer --------------------------- */
+function fmt(s){
+  const m = (s/60)|0;
+  const ss = s%60;
+  return m + ':' + (ss<10?'0':'') + ss;
+}
+function updateHUD(){
+  document.getElementById('time').textContent = fmt(elapsed);
+  document.getElementById('mistakes').textContent = mistakes;
+  const key = 'psudoku_best_'+difficulty;
+  const best = localStorage.getItem(key);
+  document.getElementById('best').textContent = best ? fmt(parseInt(best,10)) : '—';
+  // keypad done state
+  const counts = new Array(10).fill(0);
+  for(let i=0;i<81;i++) if(cell[i]>0) counts[cell[i]]++;
+  document.querySelectorAll('#keypad button').forEach(b=>{
+    const v = parseInt(b.dataset.v,10);
+    b.classList.toggle('done', counts[v] >= 9);
+  });
+}
+function setMsg(t, cls){
+  const el = document.getElementById('msg');
+  el.textContent = t;
+  el.className = 'msg ' + (cls||'');
+}
+function startTimer(){
+  if(started || finished) return;
+  started = true;
+  startTime = Date.now();
+  timerId = setInterval(()=>{
+    elapsed = ((Date.now()-startTime)/1000)|0;
+    document.getElementById('time').textContent = fmt(elapsed);
+  }, 250);
+}
+
+/* --------------------------- rendering --------------------------- */
+function render(){
+  const W = canvas.width, H = canvas.height;
+  const cellPx = W/9;
+  // background
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0,0,W,H);
+
+  // subtle checkerboard for pixel feel
+  for(let r=0;r<9;r++)for(let c=0;c<9;c++){
+    if((r+c)%2===0){
+      ctx.fillStyle = 'rgba(255,255,255,0.02)';
+      ctx.fillRect(c*cellPx, r*cellPx, cellPx, cellPx);
+    }
+  }
+
+  // selection highlight (row/col/box)
+  if(selected >= 0){
+    const sr = (selected/9)|0, sc = selected%9;
+    ctx.fillStyle = 'rgba(79,209,197,0.10)';
+    for(let i=0;i<9;i++){
+      ctx.fillRect(i*cellPx, sr*cellPx, cellPx, cellPx);
+      ctx.fillRect(sc*cellPx, i*cellPx, cellPx, cellPx);
+    }
+    const br = ((sr/3)|0)*3, bc = ((sc/3)|0)*3;
+    ctx.fillStyle = 'rgba(79,209,197,0.08)';
+    for(let rr=br;rr<br+3;rr++)for(let cc=bc;cc<bc+3;cc++)
+      ctx.fillRect(cc*cellPx, rr*cellPx, cellPx, cellPx);
+  }
+
+  // same-number highlight
+  if(selected >= 0 && cell[selected] > 0){
+    const target = cell[selected];
+    ctx.fillStyle = 'rgba(124,92,255,0.14)';
+    for(let i=0;i<81;i++){
+      if(cell[i]===target && i!==selected){
+        const r=(i/9)|0, c=i%9;
+        ctx.fillRect(c*cellPx, r*cellPx, cellPx, cellPx);
+      }
+    }
+  }
+
+  // grid lines
+  ctx.strokeStyle = '#2d3748';
+  ctx.lineWidth = 1;
+  for(let i=0;i<=9;i++){
+    ctx.beginPath();
+    ctx.moveTo(i*cellPx, 0); ctx.lineTo(i*cellPx, H); ctx.stroke();
+    ctx.moveTo(0, i*cellPx); ctx.lineTo(W, i*cellPx); ctx.stroke();
+  }
+  // thick 3x3 borders
+  ctx.strokeStyle = '#4fd1c5';
+  ctx.lineWidth = 3;
+  for(let i=0;i<=9;i+=3){
+    ctx.beginPath();
+    ctx.moveTo(i*cellPx, 0); ctx.lineTo(i*cellPx, H); ctx.stroke();
+    ctx.moveTo(0, i*cellPx); ctx.lineTo(W, i*cellPx); ctx.stroke();
+  }
+
+  // cells
+  for(let i=0;i<81;i++){
+    const r=(i/9)|0, c=i%9;
+    const x=c*cellPx, y=r*cellPx;
+    const isGiven = given[i] !== 0;
+    const isSel = i === selected;
+    const val = cell[i];
+    const wrong = val>0 && val !== solution[i];
+
+    if(isSel){
+      ctx.fillStyle = '#4fd1c5';
+      ctx.fillRect(x, y, cellPx, cellPx);
+      ctx.fillStyle = '#0d1117';
+    }
+
+    // pencil notes
+    if(notes[i].size > 0 && val === 0){
+      ctx.fillStyle = '#8b98a9';
+      const fs = Math.max(8, cellPx*0.22);
+      ctx.font = fs + 'px "Courier New", monospace';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      const ns = [...notes[i]].sort((a,b)=>a-b);
+      const cols = 3, rows = Math.ceil(ns.length/3);
+      const cw = cellPx/3, ch = cellPx/3;
+      ns.forEach((n,k)=>{
+        const cc = k%3, rr = (k/3)|0;
+        ctx.fillText(String(n), x + cw*(cc+0.5), y + ch*(rr+0.5));
+      });
+    }
+
+    // main value
+    if(val > 0){
+      let color;
+      if(isGiven) color = '#e6edf3';
+      else if(wrong) color = '#ff6b6b';
+      else color = '#4fd1c5';
+      if(isSel) color = '#0d1117';
+      ctx.fillStyle = color;
+      const fs = Math.max(14, cellPx*0.52);
+      ctx.font = 'bold ' + fs + 'px "Courier New", monospace';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(String(val), x + cellPx/2, y + cellPx/2 + 1);
+    }
+  }
+}
+
+/* --------------------------- events --------------------------- */
+function cellFromEvent(e){
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width * canvas.width;
+  const y = (e.clientY - rect.top) / rect.height * canvas.height;
+  const c = Math.floor(x / (canvas.width/9));
+  const r = Math.floor(y / (canvas.height/9));
+  if(c<0||c>8||r<0||r>8) return -1;
+  return r*9+c;
+}
+canvas.addEventListener('click', (e)=>{
+  const idx = cellFromEvent(e);
+  if(idx < 0) return;
+  selected = idx;
+  startTimer();
+  render();
+});
+canvas.addEventListener('touchstart', (e)=>{
+  if(e.touches.length){
+    const t = e.touches[0];
+    const idx = cellFromEvent(t);
+    if(idx >= 0){
+      selected = idx;
+      startTimer();
+      render();
+      e.preventDefault();
+    }
+  }
+}, {passive:false});
+
+// keypad
+const keypad = document.getElementById('keypad');
+for(let v=1; v<=9; v++){
+  const b = document.createElement('button');
+  b.textContent = v;
+  b.dataset.v = v;
+  b.addEventListener('click', ()=>{ placeValue(v); startTimer(); });
+  keypad.appendChild(b);
+}
+
+// controls
+document.getElementById('pencil').addEventListener('click', function(){
+  pencilMode = !pencilMode;
+  this.classList.toggle('on', pencilMode);
+  setMsg(pencilMode ? 'Pencil mode ON — tap numbers to add notes.' : 'Pencil mode OFF.', '');
+});
+document.getElementById('erase').addEventListener('click', ()=>{ eraseCell(); startTimer(); });
+document.getElementById('undo').addEventListener('click', ()=>{ doUndo(); startTimer(); });
+document.getElementById('new').addEventListener('click', ()=>{ newGame(difficulty); });
+document.getElementById('ovNew').addEventListener('click', ()=>{ newGame(difficulty); });
+
+// difficulty
+document.getElementById('diff').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button');
+  if(!btn) return;
+  document.querySelectorAll('#diff button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  newGame(btn.dataset.d);
+});
+
+// keyboard
+document.addEventListener('keydown', (e)=>{
+  if(e.key >= '1' && e.key <= '9'){ placeValue(parseInt(e.key,10)); startTimer(); }
+  else if(e.key === 'Backspace' || e.key === 'Delete' || e.key === '0'){ eraseCell(); startTimer(); }
+  else if(e.key === 'p' || e.key === 'P'){ document.getElementById('pencil').click(); }
+  else if(e.key === 'z' && (e.ctrlKey || e.metaKey)){ e.preventDefault(); doUndo(); }
+  else if(e.key.startsWith('Arrow') && selected >= 0){
+    let r=(selected/9)|0, c=selected%9;
+    if(e.key==='ArrowUp') r=Math.max(0,r-1);
+    if(e.key==='ArrowDown') r=Math.min(8,r+1);
+    if(e.key==='ArrowLeft') c=Math.max(0,c-1);
+    if(e.key==='ArrowRight') c=Math.min(8,c+1);
+    selected = r*9+c;
+    render();
+  }
+});
+
+/* --------------------------- init --------------------------- */
+newGame('medium');
+</script>
+</body>
+</html>
