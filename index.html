@@ -53,6 +53,24 @@
     box-shadow:0 0 0 4px #0a0d12, 0 12px 30px rgba(0,0,0,.5);
   }
   canvas{ display:block; width:100%; height:100%; image-rendering:pixelated; }
+  @media (max-height:760px){
+    body{ padding:8px 8px 12px; }
+    header{ margin-bottom:6px; }
+    h1{ font-size:16px; }
+    .tag{ margin-top:2px; font-size:10px; }
+    .hud{ margin-bottom:6px; gap:6px; }
+    .stat{ padding:4px 8px; font-size:11px; min-width:64px; }
+    .stat b{ font-size:13px; }
+    .diff{ margin-bottom:6px; }
+    .diff button{ padding:5px 10px; font-size:11px; }
+    .board-wrap{ width:min(88vw,340px); }
+    .controls{ margin-top:8px; gap:6px; }
+    .btn{ padding:7px 10px; font-size:11px; }
+    .keypad{ margin-top:8px; gap:4px; }
+    .keypad button{ padding:8px 0; font-size:14px; }
+    .msg{ margin-top:6px; font-size:12px; }
+    footer{ margin-top:10px; }
+  }
 
   .controls{
     display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap;
@@ -100,6 +118,16 @@
   .overlay h2{ font-size:26px; letter-spacing:3px; color:var(--gold); margin-bottom:10px; }
   .overlay p{ color:var(--ink); font-size:14px; margin:4px 0; }
   .overlay .btn{ margin-top:16px; }
+  .overlay .big{ font-size:18px; padding:14px 34px; }
+  .overlay .howto{ color:var(--dim); font-size:12px; letter-spacing:1px; margin-top:6px; }
+  .overlay .keys{ color:var(--dim); font-size:11px; letter-spacing:1px; margin-top:10px; }
+  .overlay .btns{ display:flex; gap:10px; margin-top:18px; }
+  @media (max-height:760px){
+    .overlay h2{ font-size:20px; margin-bottom:6px; }
+    .overlay p{ font-size:12px; }
+    .overlay .big{ font-size:15px; padding:10px 26px; }
+    .overlay .btns{ margin-top:12px; }
+  }
 </style>
 </head>
 <body>
@@ -127,7 +155,25 @@
     <p id="ovTime">Time: 0:00</p>
     <p id="ovBest">Best: —</p>
     <p id="ovMist">Mistakes: 0</p>
-    <button class="btn new" id="ovNew">New Game</button>
+    <div class="btns">
+      <button class="btn new big" id="ovNew">Play Again</button>
+    </div>
+  </div>
+  <div class="overlay" id="startOverlay">
+    <h2 style="color:var(--accent)">PIXEL SUDOKU</h2>
+    <p>Fill every row, column and 3×3 box with 1–9.</p>
+    <p class="howto">Tap a cell, then a number · P = pencil · Ctrl+Z = undo</p>
+    <div class="btns">
+      <button class="btn new big" id="startBtn">▶ Play</button>
+    </div>
+    <p class="keys">KEYS: 1–9 place · arrows move · 0/⌫ erase</p>
+  </div>
+  <div class="overlay" id="pauseOverlay">
+    <h2 style="color:var(--accent)">PAUSED</h2>
+    <p>Timer is stopped.</p>
+    <div class="btns">
+      <button class="btn new big" id="resumeBtn">Resume</button>
+    </div>
   </div>
 </div>
 
@@ -173,6 +219,8 @@ let elapsed = 0;
 let timerId = null;
 let undoStack = [];
 let difficulty = 'medium';
+let paused = false;
+let audioCtx = null;
 
 const DIFF = {
   easy:   { remove: 38, label: 'EASY'   },
@@ -324,8 +372,10 @@ function placeValue(v){
       notes[selected].clear();
       if(v !== solution[selected]){
         mistakes++;
+        sfx(160, 0.12, 'sawtooth', 0.05);
         setMsg('Not right — check row, column, box.', 'bad');
       } else {
+        sfx(660, 0.08, 'square', 0.05);
         setMsg('Nice.', '');
       }
     }
@@ -360,6 +410,9 @@ function checkWin(){
   document.getElementById('ovMist').textContent = 'Mistakes: ' + mistakes;
   document.getElementById('overlay').classList.add('show');
   setMsg('Solved! Great work.', 'win');
+  sfx(523, 0.1, 'square', 0.06);
+  setTimeout(()=>sfx(659, 0.1, 'square', 0.06), 110);
+  setTimeout(()=>sfx(784, 0.18, 'square', 0.06), 220);
   updateHUD();
 }
 
@@ -393,9 +446,42 @@ function startTimer(){
   started = true;
   startTime = Date.now();
   timerId = setInterval(()=>{
+    if(paused) return;
     elapsed = ((Date.now()-startTime)/1000)|0;
     document.getElementById('time').textContent = fmt(elapsed);
   }, 250);
+}
+function pauseGame(){
+  if(!started || finished || paused) return;
+  paused = true;
+  if(timerId){ clearInterval(timerId); timerId = null; }
+  document.getElementById('pauseOverlay').classList.add('show');
+}
+function resumeGame(){
+  if(!paused) return;
+  paused = false;
+  startTime = Date.now() - elapsed*1000;
+  timerId = setInterval(()=>{
+    if(paused) return;
+    elapsed = ((Date.now()-startTime)/1000)|0;
+    document.getElementById('time').textContent = fmt(elapsed);
+  }, 250);
+  document.getElementById('pauseOverlay').classList.remove('show');
+}
+function sfx(freq, dur, type, vol){
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.value = freq;
+    g.gain.value = vol || 0.06;
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + dur);
+  }catch(e){}
 }
 
 /* --------------------------- rendering --------------------------- */
@@ -553,6 +639,11 @@ document.getElementById('erase').addEventListener('click', ()=>{ eraseCell(); st
 document.getElementById('undo').addEventListener('click', ()=>{ doUndo(); startTimer(); });
 document.getElementById('new').addEventListener('click', ()=>{ newGame(difficulty); });
 document.getElementById('ovNew').addEventListener('click', ()=>{ newGame(difficulty); });
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  document.getElementById('startOverlay').classList.remove('show');
+  sfx(440, 0.08, 'square', 0.05);
+});
+document.getElementById('resumeBtn').addEventListener('click', ()=>{ resumeGame(); });
 
 // difficulty
 document.getElementById('diff').addEventListener('click', (e)=>{
@@ -568,6 +659,7 @@ document.addEventListener('keydown', (e)=>{
   if(e.key >= '1' && e.key <= '9'){ placeValue(parseInt(e.key,10)); startTimer(); }
   else if(e.key === 'Backspace' || e.key === 'Delete' || e.key === '0'){ eraseCell(); startTimer(); }
   else if(e.key === 'p' || e.key === 'P'){ document.getElementById('pencil').click(); }
+  else if(e.key === 'Escape' || e.key === ' '){ if(started && !finished){ paused ? resumeGame() : pauseGame(); } }
   else if(e.key === 'z' && (e.ctrlKey || e.metaKey)){ e.preventDefault(); doUndo(); }
   else if(e.key.startsWith('Arrow') && selected >= 0){
     let r=(selected/9)|0, c=selected%9;
@@ -580,8 +672,14 @@ document.addEventListener('keydown', (e)=>{
   }
 });
 
+/* --------------------------- pause on tab hidden --------------------------- */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){ pauseGame(); }
+});
+
 /* --------------------------- init --------------------------- */
 newGame('medium');
+document.getElementById('startOverlay').classList.add('show');
 </script>
 </body>
 </html>
